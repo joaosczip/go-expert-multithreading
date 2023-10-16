@@ -40,12 +40,7 @@ type CepData interface {
 	ApiCepData | ViaCepData
 }
 
-func makeRequest[T CepData](cep, baseUrl string) (*T, error) {
-	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, time.Second*1)
-
-	defer cancel()
-
+func makeRequest[T CepData](ctx context.Context, cep, baseUrl string) (*T, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", baseUrl, nil)
 
 	if err != nil {
@@ -80,8 +75,8 @@ func makeRequest[T CepData](cep, baseUrl string) (*T, error) {
 	return &cepData, nil
 }
 
-func getApiCep(cep string, cepCh chan<- ApiCepData) {
-	data, err := makeRequest[ApiCepData](cep, fmt.Sprintf("%s/%s.json", API_CEP_BASE_URL, cep))
+func getApiCep(ctx context.Context, cep string, cepCh chan<- ApiCepData) {
+	data, err := makeRequest[ApiCepData](ctx, cep, fmt.Sprintf("%s/%s.json", API_CEP_BASE_URL, cep))
 
 	if err != nil {
 		log.Printf("unable to get the cep data from 'apicep': %s", err)
@@ -91,8 +86,8 @@ func getApiCep(cep string, cepCh chan<- ApiCepData) {
 	cepCh <- *data
 }
 
-func getViaCep(cep string, cepCh chan ViaCepData) {
-	data, err := makeRequest[ViaCepData](cep, fmt.Sprintf("%s/%s/json", VIACEP_BASE_URL, cep))
+func getViaCep(ctx context.Context, cep string, cepCh chan ViaCepData) {
+	data, err := makeRequest[ViaCepData](ctx, cep, fmt.Sprintf("%s/%s/json", VIACEP_BASE_URL, cep))
 
 	if err != nil {
 		log.Printf("unable to get the cep data from 'viacep': %s", err)
@@ -113,16 +108,25 @@ func handleResponseReceived[T CepData](api string, data T) {
 }
 
 func main() {
+	timeoutDuration := time.Second * 1
+
+	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, timeoutDuration)
+
+	defer cancel()
+
 	apiCepCh := make(chan ApiCepData)
 	viaCepCh := make(chan ViaCepData)
 
-	go getApiCep("06233-030", apiCepCh)
-	go getViaCep("06233030", viaCepCh)
+	go getApiCep(ctx, "06233-030", apiCepCh)
+	go getViaCep(ctx, "06233030", viaCepCh)
 
 	select {
 	case cepData := <-apiCepCh:
 		handleResponseReceived[ApiCepData]("apicep", cepData)
 	case cepData := <-viaCepCh:
 		handleResponseReceived[ViaCepData]("viacep", cepData)
+	case <-time.After(timeoutDuration):
+		log.Println("the request didn't finish, timeout exceeded")
 	}
 }
